@@ -25,6 +25,9 @@ transform_test_list = transforms.Compose([
 mnist_train = torchvision.datasets.MNIST(root='./mnist_data/',train=True,download=True,transform=transform_train_list)
 mnist_test = torchvision.datasets.MNIST(root='./mnist_data/',train=False,download=True,transform=transform_test_list)
 
+cifar10_train = torchvision.datasets.CIFAR10(root='./cifar10_data/',train=True,download=True,transform=transform_train_list)
+cifar10_test = torchvision.datasets.CIFAR10(root='./cifar10_data/',train=False,download=True,transform=transform_test_list)
+
 mnist_dataloaders = {
     'train': torch.utils.data.DataLoader(mnist_train,batch_size=128,shuffle=True),
     'test': torch.utils.data.DataLoader(mnist_test,batch_size=128,shuffle=False)
@@ -33,6 +36,16 @@ mnist_dataloaders = {
 mnist_size = {
     'train': len(mnist_train),
     'test': len(mnist_test)
+}
+
+cifar10_dataloaders = {
+    'train': torch.utils.data.DataLoader(cifar10_train,batch_size=128,shuffle=True),
+    'test': torch.utils.data.DataLoader(cifar10_test,batch_size=128,shuffle=False)
+}
+
+cifar10_size = {
+    'train': len(cifar10_train),
+    'test': len(cifar10_test)
 }
 
 class CNN(nn.Module):
@@ -68,11 +81,48 @@ class CNN(nn.Module):
         
         return x
     
+class CNN10(nn.Module):
+    def __init__(self):
+        super(CNN10,self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=3,out_channels=32,kernel_size=3,padding=1,stride=1,bias=False)
+        self.conv2 = nn.Conv2d(32,64,3,1,1,bias=False)
+        self.conv3 = nn.Conv2d(64,128,3,1,1,bias=False)
+        self.batch1 = nn.BatchNorm2d(32)
+        self.batch2 = nn.BatchNorm2d(64)
+        self.batch3 = nn.BatchNorm2d(128)
+        self.pool = nn.MaxPool2d(2,2)
+        self.fc = nn.LazyLinear(10)
+        
+    def forward(self,x):
+        x = self.conv1(x)
+        x = self.batch1(x)
+        x = F.relu(x)
+        x = self.pool(x)
+        
+        x = self.conv2(x)
+        x = self.batch2(x)
+        x = F.relu(x)
+        x = self.pool(x)
+        
+        x = self.conv3(x)
+        x = self.batch3(x)
+        x = F.relu(x)
+        x = self.pool(x)
+        
+        x = x.view(x.size(0),-1)
+        x = self.fc(x)
+        
+        return x
+    
 mnist_model = CNN().cuda()
+cifar10_model = CNN10().cuda()
 
 mnist_optimizer = optim.SGD(mnist_model.parameters(),lr=0.01)
 mnist_scheduler = CosineAnnealingLR(mnist_optimizer, T_max=100)
 criterion = nn.CrossEntropyLoss()
+
+cifar10_optimizer = optim.SGD(cifar10_model.parameters(),lr=0.01)
+cifar10_scheduler = CosineAnnealingLR(cifar10_optimizer, T_max=100)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -121,3 +171,4 @@ def train(model,dataloaders,train_epoch,loss_fn,optimizer,scheduler,size):
     return loss_li,acc_li
 
 train(mnist_model,mnist_dataloaders,3,criterion,mnist_optimizer,mnist_scheduler,mnist_size)
+train(cifar10_model,cifar10_dataloaders,10,criterion,cifar10_optimizer,cifar10_scheduler,cifar10_size)
