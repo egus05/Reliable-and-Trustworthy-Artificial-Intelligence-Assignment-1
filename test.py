@@ -44,20 +44,24 @@ class CNN(nn.Module):
         self.batch1 = nn.BatchNorm2d(32)
         self.batch2 = nn.BatchNorm2d(64)
         self.batch3 = nn.BatchNorm2d(128)
+        self.pool = nn.MaxPool2d(2,2)
         self.fc = nn.LazyLinear(10)
         
     def forward(self,x):
         x = self.conv1(x)
         x = self.batch1(x)
         x = F.relu(x)
+        x = self.pool(x)
         
         x = self.conv2(x)
         x = self.batch2(x)
         x = F.relu(x)
+        x = self.pool(x)
         
         x = self.conv3(x)
         x = self.batch3(x)
         x = F.relu(x)
+        x = self.pool(x)
         
         x = x.view(x.size(0),-1)
         x = self.fc(x)
