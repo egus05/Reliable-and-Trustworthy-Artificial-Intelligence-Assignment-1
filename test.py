@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torchvision import models
 from torchvision import datasets
 
 resize = (32,32)
@@ -80,7 +81,7 @@ class CNN(nn.Module):
         x = self.fc(x)
         
         return x
-    
+"""   
 class CNN10(nn.Module):
     def __init__(self):
         super(CNN10,self).__init__()
@@ -113,9 +114,11 @@ class CNN10(nn.Module):
         x = self.fc(x)
         
         return x
-    
+"""
 mnist_model = CNN().cuda()
-cifar10_model = CNN10().cuda()
+cifar10_model = models.efficientnet_b0(weights='DEFAULT')
+cifar10_model.classifier[1] = nn.Linear(cifar10_model.classifier[1].in_features,10)
+cifar10_model.cuda()
 
 mnist_optimizer = optim.SGD(mnist_model.parameters(),lr=0.01)
 mnist_scheduler = CosineAnnealingLR(mnist_optimizer, T_max=100)
