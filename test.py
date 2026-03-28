@@ -116,9 +116,10 @@ class CNN10(nn.Module):
         return x
 """
 mnist_model = CNN().cuda()
-cifar10_model = models.efficientnet_b0(weights='DEFAULT')
-cifar10_model.classifier[1] = nn.Linear(cifar10_model.classifier[1].in_features,10)
-cifar10_model.cuda()
+
+cifar10_model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.DEFAULT)
+cifar10_model.classifier[2] = nn.Linear(cifar10_model.classifier[2].in_features,10)
+cifar10_model = cifar10_model.cuda()
 
 mnist_optimizer = optim.SGD(mnist_model.parameters(),lr=0.01)
 mnist_scheduler = CosineAnnealingLR(mnist_optimizer, T_max=100)
@@ -126,6 +127,7 @@ criterion = nn.CrossEntropyLoss()
 
 cifar10_optimizer = optim.SGD(cifar10_model.parameters(),lr=0.01)
 cifar10_scheduler = CosineAnnealingLR(cifar10_optimizer, T_max=100)
+criterion = nn.CrossEntropyLoss()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -174,4 +176,4 @@ def train(model,dataloaders,train_epoch,loss_fn,optimizer,scheduler,size):
     return loss_li,acc_li
 
 train(mnist_model,mnist_dataloaders,3,criterion,mnist_optimizer,mnist_scheduler,mnist_size)
-train(cifar10_model,cifar10_dataloaders,10,criterion,cifar10_optimizer,cifar10_scheduler,cifar10_size)
+train(cifar10_model,cifar10_dataloaders,5,criterion,cifar10_optimizer,cifar10_scheduler,cifar10_size)
