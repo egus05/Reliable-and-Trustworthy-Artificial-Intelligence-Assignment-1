@@ -9,25 +9,94 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import models
 from torchvision import datasets
 
+def fgsm_targeted(model,x,target,eps=0.3):
+    
+    x_adv = x.detach().clone().requires_grad_(True)
+    loss_fn = nn.CrossEntropyLoss()
+    
+    logits = model(x_adv)
+    loss = loss_fn(logits,target)
+    model.zero_grad()
+    loss.backward()
+    
+    with torch.no_grad():
+        x_adv = x_adv - eps * torch.sign(x_adv.grad)
+        x_adv = torch.clamp(x_adv,min=0,max=1)
+        
+    return x_adv
+
+def fgsm_untargeted(model,x,label,eps=0.3):
+    x_adv = x.detach().clone().requires_grad_(True)
+    loss_fn = nn.CrossEntropyLoss()
+    
+    logits = model(x_adv)
+    loss = loss_fn(logits,label)
+    model.zero_grad()
+    loss.backward()
+    
+    with torch.no_grad():
+        x_adv = x_adv + eps * torch.sign(x_adv.grad)
+        x_adv = torch.clamp(x_adv,min=0,max=1)
+    
+    return x_adv
+
+def pgd_targeted(model,x,label,k=5,eps_step=0.01,eps=0.3):
+    x_adv = x.detach().clone()
+    
+    for i in range(k):
+        x_adv.requires_grad_(True)
+        x_adv = fgsm_targeted(model,x_adv,label,eps_step)
+        
+        with torch.no_grad():
+            x_adv = torch.clamp(x_adv,x-eps,x+eps)
+            x_adv = torch.clamp(x_adv,0,1)
+        
+    return x_adv
+
+def pgd_untargeted(model,x,target,k=5,eps_step=0.01,eps=0.3):
+    x_adv = x.detach().clone()
+    
+    for i in range(k):
+        x_adv.requires_grad_(True)
+        x_adv = fgsm_untargeted(model,x_adv,target,eps_step)
+        
+        with torch.no_grad():
+            x_adv = torch.clamp(x_adv,x-eps,x+eps)
+            x_adv = torch.clamp(x_adv,0,1)
+        
+    return x_adv
+
 resize = (32,32)
 
-transform_train_list = transforms.Compose([
+mnist_transform_train_list = transforms.Compose([
     transforms.Resize(resize,interpolation=InterpolationMode.BICUBIC),
     transforms.RandomCrop(32),
     transforms.ToTensor()
 ])
 
-transform_test_list = transforms.Compose([
+mnist_transform_test_list = transforms.Compose([
     transforms.Resize(resize,interpolation=InterpolationMode.BICUBIC),
     transforms.RandomCrop(32),
     transforms.ToTensor()
 ])
 
-mnist_train = torchvision.datasets.MNIST(root='./mnist_data/',train=True,download=True,transform=transform_train_list)
-mnist_test = torchvision.datasets.MNIST(root='./mnist_data/',train=False,download=True,transform=transform_test_list)
+cifar10_transform_train_list = transforms.Compose([
+    transforms.Resize(resize,interpolation=InterpolationMode.BICUBIC),
+    transforms.RandomCrop(32),
+    transforms.ToTensor()
+])
 
-cifar10_train = torchvision.datasets.CIFAR10(root='./cifar10_data/',train=True,download=True,transform=transform_train_list)
-cifar10_test = torchvision.datasets.CIFAR10(root='./cifar10_data/',train=False,download=True,transform=transform_test_list)
+cifar10_transform_test_list = transforms.Compose([
+    transforms.Resize(resize,interpolation=InterpolationMode.BICUBIC),
+    transforms.RandomCrop(32),
+    transforms.ToTensor()
+])
+
+mnist_train = torchvision.datasets.MNIST(root='./mnist_data/',train=True,download=True,transform=mnist_transform_train_list)
+mnist_test = torchvision.datasets.MNIST(root='./mnist_data/',train=False,download=True,transform=mnist_transform_test_list)
+
+cifar10_train = torchvision.datasets.CIFAR10(root='./cifar10_data/',train=True,download=True,transform=cifar10_transform_train_list)
+cifar10_test = torchvision.datasets.CIFAR10(root='./cifar10_data/',train=False,download=True,transform=cifar10_transform_test_list)
 
 mnist_dataloaders = {
     'train': torch.utils.data.DataLoader(mnist_train,batch_size=128,shuffle=True),
