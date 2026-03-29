@@ -21,23 +21,24 @@ attack 함수 정의
 """
 
 
-def fgsm_targeted(model,x,target,eps=0.3):
+def fgsm_targeted(model,x,target,eps=0.01):
     
-    x_adv = x.detach().clone().requires_grad_(True)
+    x_adv = x.detach().clone().requires_grad_(True) #x에 대한 연산을 추적
     loss_fn = nn.CrossEntropyLoss()
     
-    logits = model(x_adv)
-    loss = loss_fn(logits,target)
+    logits = model(x_adv) #x의 logit 계산
+    loss = loss_fn(logits,target) #x와 target의 오차 계산
+    #모델 가중치 초기화 및 역전파
     model.zero_grad()
     loss.backward()
     
     with torch.no_grad():
-        x_adv = x_adv - eps * torch.sign(x_adv.grad)
-        x_adv = torch.clamp(x_adv,min=0,max=1)
+        x_adv = x_adv - eps * torch.sign(x_adv.grad) #FGSM 연산(target과 가까워지는 방향으로 '-' 연산)
+        x_adv = torch.clamp(x_adv,min=0,max=1) # [0,1]사이의 값으로 clip
         
     return x_adv
 
-def fgsm_untargeted(model,x,label,eps=0.3):
+def fgsm_untargeted(model,x,label,eps=0.01):
     x_adv = x.detach().clone().requires_grad_(True)
     loss_fn = nn.CrossEntropyLoss()
     
@@ -47,22 +48,23 @@ def fgsm_untargeted(model,x,label,eps=0.3):
     loss.backward()
     
     with torch.no_grad():
-        x_adv = x_adv + eps * torch.sign(x_adv.grad)
-        x_adv = torch.clamp(x_adv,min=0,max=1)
+        x_adv = x_adv + eps * torch.sign(x_adv.grad) #FGSM 연산(Loss가 커지는 방향으로 '+' 연산)
+        x_adv = torch.clamp(x_adv,min=0,max=1) # [0,1]사이의 값으로 clip
     
     return x_adv
 
 def pgd_targeted(model,x,label,k=40,eps_step=0.01,eps=0.3):
     x_adv = x.detach().clone()
     
+    #k번 반복
     for i in range(k):
         x_adv.requires_grad_(True)
-        x_adv = fgsm_targeted(model,x_adv,label,eps_step)
+        x_adv = fgsm_targeted(model,x_adv,label,eps_step) #targeted FGSM연산
         
         with torch.no_grad():
-            x_adv = torch.clamp(x_adv,x-eps,x+eps) #x 범위가 [x-ε,x+ε]사이에 있을 수 있게 clip
-            x_adv = torch.clamp(x_adv,0,1)
-        
+            x_adv = torch.clamp(x_adv,x-eps,x+eps) #x 범위가 [x-ε,x+ε]사이에 있을 수 있게 clip => projection과정
+            x_adv = torch.clamp(x_adv,0,1) # [0,1]사이 값으로 clip => valid한 이미지 범위로 맞춤
+         
     return x_adv
 
 def pgd_untargeted(model,x,target,k=40,eps_step=0.01,eps=0.3):
@@ -70,7 +72,7 @@ def pgd_untargeted(model,x,target,k=40,eps_step=0.01,eps=0.3):
     
     for i in range(k):
         x_adv.requires_grad_(True)
-        x_adv = fgsm_untargeted(model,x_adv,target,eps_step)
+        x_adv = fgsm_untargeted(model,x_adv,target,eps_step) #untargeted FGSM연산
         
         with torch.no_grad():
             x_adv = torch.clamp(x_adv,x-eps,x+eps)
@@ -109,13 +111,14 @@ cifar10_transform_test_list = transforms.Compose([
     transforms.RandomCrop(32),
     transforms.ToTensor()
 ])
-
+#dataset 준비
 mnist_train = torchvision.datasets.MNIST(root='./mnist_data/',train=True,download=True,transform=mnist_transform_train_list)
 mnist_test = torchvision.datasets.MNIST(root='./mnist_data/',train=False,download=True,transform=mnist_transform_test_list)
 
 cifar10_train = torchvision.datasets.CIFAR10(root='./cifar10_data/',train=True,download=True,transform=cifar10_transform_train_list)
 cifar10_test = torchvision.datasets.CIFAR10(root='./cifar10_data/',train=False,download=True,transform=cifar10_transform_test_list)
 
+#dataloader 정의
 mnist_dataloaders = {
     'train': torch.utils.data.DataLoader(mnist_train,batch_size=128,shuffle=True),
     'test': torch.utils.data.DataLoader(mnist_test,batch_size=128,shuffle=False)
@@ -199,38 +202,45 @@ def train(model,dataloaders,train_epoch,loss_fn,optimizer,scheduler,size):
             running_loss = 0.0
             running_corrects = 0.0   
             
-            
-                
+            #데이터 로드
             for data in dataloaders[phase]:
                 inputs,label = data
                 inputs,label = inputs.to(device), label.to(device)
                 
                 if phase == 'train':
                     optimizer.zero_grad()
-                    
+                
+                #loss 계산
                 model_output = model(inputs)
                 _,preds = torch.max(model_output.data,1)
                 loss = loss_fn(model_output,label)
                 
+                #역전파
                 if phase == 'train':
                     loss.backward()
                     optimizer.step()
-                    
+                
                 running_loss += loss.item()
                 running_corrects += torch.sum(preds == label.data).item()
                 
             epoch_loss = running_loss / len(dataloaders[phase])
             epoch_acc = running_corrects / size[phase]
+            
             print(f'epoch :{epoch}')
             print(f'{phase} Loss:{epoch_loss:.6f} // Acc:{100*epoch_acc:.4f}%\n') 
+            
             loss_li[phase].append(epoch_loss)
             acc_li[phase].append(100*epoch_acc)
+            
         scheduler.step()
         
     return loss_li,acc_li
 
+#train 시작
+print("===train start===")
 train(mnist_model,mnist_dataloaders,3,criterion,mnist_optimizer,mnist_scheduler,mnist_size)
 train(cifar10_model,cifar10_dataloaders,5,criterion,cifar10_optimizer,cifar10_scheduler,cifar10_size)
+print("===train end===")
 
 """
 attack simulation 함수 정의
@@ -293,17 +303,20 @@ def attack_simulation(model,dataloaders,attack,dataset,eps,device,sample_size=10
             
                 fig = plt.figure()
                 fig.tight_layout()
-            
+                
+                #원본 이미지
                 ax1 = fig.add_subplot(131)
                 ax1.set_title('Original')
                 ax1.set_xlabel(f'label:{label[i].item()}/pred:{ori_preds[i].item()}')
                 plt.imshow(ori)
-            
+
+                #Adversial 이미지
                 ax2 = fig.add_subplot(132)
                 ax2.set_title('Adversarial')
                 ax2.set_xlabel(f'label:{label[i].item()}/pred:{preds[i].item()}')
                 plt.imshow(adv)
-            
+                
+                #차이를 확대한 이미지
                 ax3 = fig.add_subplot(133)
                 ax3.set_title('Perturbation')
                 plt.imshow(pert)
