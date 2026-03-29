@@ -14,6 +14,13 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import models
 from torchvision import datasets
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+"""
+attack 함수 정의
+"""
+
+
 def fgsm_targeted(model,x,target,eps=0.3):
     
     x_adv = x.detach().clone().requires_grad_(True)
@@ -45,7 +52,7 @@ def fgsm_untargeted(model,x,label,eps=0.3):
     
     return x_adv
 
-def pgd_targeted(model,x,label,k=5,eps_step=0.01,eps=0.3):
+def pgd_targeted(model,x,label,k=40,eps_step=0.01,eps=0.3):
     x_adv = x.detach().clone()
     
     for i in range(k):
@@ -53,12 +60,12 @@ def pgd_targeted(model,x,label,k=5,eps_step=0.01,eps=0.3):
         x_adv = fgsm_targeted(model,x_adv,label,eps_step)
         
         with torch.no_grad():
-            x_adv = torch.clamp(x_adv,x-eps,x+eps)
+            x_adv = torch.clamp(x_adv,x-eps,x+eps) #x 범위가 [x-ε,x+ε]사이에 있을 수 있게 clip
             x_adv = torch.clamp(x_adv,0,1)
         
     return x_adv
 
-def pgd_untargeted(model,x,target,k=5,eps_step=0.01,eps=0.3):
+def pgd_untargeted(model,x,target,k=40,eps_step=0.01,eps=0.3):
     x_adv = x.detach().clone()
     
     for i in range(k):
@@ -70,6 +77,12 @@ def pgd_untargeted(model,x,target,k=5,eps_step=0.01,eps=0.3):
             x_adv = torch.clamp(x_adv,0,1)
         
     return x_adv
+
+"""
+모델 준비 및 train
+mnist에는 Custom CNN
+cifar10에는 convnext_Tiny를 사용
+"""
 
 resize = (32,32)
 
@@ -123,6 +136,7 @@ cifar10_size = {
     'test': len(cifar10_test)
 }
 
+#Cutsom CNN정의
 class CNN(nn.Module):
     def __init__(self):
         super(CNN,self).__init__()
@@ -170,7 +184,6 @@ cifar10_optimizer = optim.SGD(cifar10_model.parameters(),lr=0.01)
 cifar10_scheduler = CosineAnnealingLR(cifar10_optimizer, T_max=100)
 criterion = nn.CrossEntropyLoss()
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def train(model,dataloaders,train_epoch,loss_fn,optimizer,scheduler,size):
     loss_li = {'train':[],'test':[]}
@@ -219,20 +232,30 @@ def train(model,dataloaders,train_epoch,loss_fn,optimizer,scheduler,size):
 train(mnist_model,mnist_dataloaders,3,criterion,mnist_optimizer,mnist_scheduler,mnist_size)
 train(cifar10_model,cifar10_dataloaders,5,criterion,cifar10_optimizer,cifar10_scheduler,cifar10_size)
 
+"""
+attack simulation 함수 정의
+"""
+
 def attack_simulation(model,dataloaders,attack,dataset,eps,device,sample_size=100):
     model.eval()
-    success = 0
-    tot = 0
+    success = 0 #라벨을 맞춘 데이터의 수
+    tot = 0 #총 데이터의 수
+    image_created = False #이미지 생성여부
     
     for data in dataloaders['test']:
-        image_created = False
         inputs,label = data
         inputs,label = inputs.to(device), label.to(device)
-        target = torch.full_like(label,7).to(device)
-        target[label == 7] = 0
+        target = torch.full_like(label,7).to(device) #target을 7로 설정
+        target[label == 7] = 0 # label이 7인 경우 target을 0으로 변경
+        
+        #orignal 데이터에 대한 예측
+        with torch.no_grad():
+            ori_output = model(inputs)
+            _,ori_preds = torch.max(ori_output.data,1)
         
         if attack == 'fgsm_targeted':
             x_adv = fgsm_targeted(model,inputs,target,eps)
+            #cls 1은 targeted 0은 untargeted
             cls = 1
         
         elif attack == 'fgsm_untargeted':
@@ -247,6 +270,7 @@ def attack_simulation(model,dataloaders,attack,dataset,eps,device,sample_size=10
             x_adv = pgd_untargeted(model,inputs,label,k=5,eps=eps)
             cls = 0
         
+        #attack을 적용한 데이터에 대한 예측
         with torch.no_grad():
             model_output = model(x_adv)
             _,preds = torch.max(model_output.data,1)
@@ -258,9 +282,11 @@ def attack_simulation(model,dataloaders,attack,dataset,eps,device,sample_size=10
             
             tot += label.size(0)
             
-        if image_created == False:
-            
+        #이미지를 한 번만 생성할 수 있게
+        if not image_created:
+            #이미지 시각화 및 저장
             for i in range(5):
+                #이미지에 맞게 차원을 변경
                 ori = inputs[i].cpu().permute(1,2,0).numpy()
                 adv = x_adv[i].cpu().permute(1,2,0).numpy()
                 pert = np.clip(np.abs(ori-adv)*10,0,1)
@@ -269,24 +295,26 @@ def attack_simulation(model,dataloaders,attack,dataset,eps,device,sample_size=10
                 fig.tight_layout()
             
                 ax1 = fig.add_subplot(131)
-                ax1.set_title('Original Image')
+                ax1.set_title('Original')
+                ax1.set_xlabel(f'label:{label[i].item()}/pred:{ori_preds[i].item()}')
                 plt.imshow(ori)
             
                 ax2 = fig.add_subplot(132)
-                ax2.set_title('Adversarial Image')
+                ax2.set_title('Adversarial')
+                ax2.set_xlabel(f'label:{label[i].item()}/pred:{preds[i].item()}')
                 plt.imshow(adv)
             
                 ax3 = fig.add_subplot(133)
-                ax3.set_title('Perturbation Image')
+                ax3.set_title('Perturbation')
                 plt.imshow(pert)
-            
-                if model == mnist_model:
-                    plt.savefig(f"results/mnist/{i}th_mnist_sample.png")
-                else:
-                    plt.savefig(f"results/cifar10/{i}th_cifar10_sample.png")
+                
+                save = f'results/{dataset}/{attack}_{i}th_sample.png'
+                plt.savefig(save)
                 plt.close()
+                
             image_created = True
             
+        #100개의 샘플에 대해서만 실행
         if tot >= sample_size:
             break    
         
@@ -296,6 +324,9 @@ os.makedirs('results',exist_ok=True)
 os.makedirs('results/cifar10',exist_ok=True)
 os.makedirs('results/mnist',exist_ok=True)
 
+"""
+결과표시
+"""
 attack_type = ['fgsm_targeted','fgsm_untargeted','pgd_targeted','pgd_untargeted']
 
 mnist_result = {}
