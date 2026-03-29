@@ -1,5 +1,10 @@
+import os
+import numpy as np
+import pandas as pd
 import torch
 import torchvision
+import matplotlib.pyplot as plt
+import pandas as pd
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
@@ -150,40 +155,7 @@ class CNN(nn.Module):
         x = self.fc(x)
         
         return x
-"""   
-class CNN10(nn.Module):
-    def __init__(self):
-        super(CNN10,self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=3,out_channels=32,kernel_size=3,padding=1,stride=1,bias=False)
-        self.conv2 = nn.Conv2d(32,64,3,1,1,bias=False)
-        self.conv3 = nn.Conv2d(64,128,3,1,1,bias=False)
-        self.batch1 = nn.BatchNorm2d(32)
-        self.batch2 = nn.BatchNorm2d(64)
-        self.batch3 = nn.BatchNorm2d(128)
-        self.pool = nn.MaxPool2d(2,2)
-        self.fc = nn.LazyLinear(10)
-        
-    def forward(self,x):
-        x = self.conv1(x)
-        x = self.batch1(x)
-        x = F.relu(x)
-        x = self.pool(x)
-        
-        x = self.conv2(x)
-        x = self.batch2(x)
-        x = F.relu(x)
-        x = self.pool(x)
-        
-        x = self.conv3(x)
-        x = self.batch3(x)
-        x = F.relu(x)
-        x = self.pool(x)
-        
-        x = x.view(x.size(0),-1)
-        x = self.fc(x)
-        
-        return x
-"""
+
 mnist_model = CNN().cuda()
 
 cifar10_model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.DEFAULT)
@@ -246,3 +218,98 @@ def train(model,dataloaders,train_epoch,loss_fn,optimizer,scheduler,size):
 
 train(mnist_model,mnist_dataloaders,3,criterion,mnist_optimizer,mnist_scheduler,mnist_size)
 train(cifar10_model,cifar10_dataloaders,5,criterion,cifar10_optimizer,cifar10_scheduler,cifar10_size)
+
+def attack_simulation(model,dataloaders,attack,dataset,eps,device,sample_size=100):
+    model.eval()
+    success = 0
+    tot = 0
+    
+    for data in dataloaders['test']:
+        image_created = False
+        inputs,label = data
+        inputs,label = inputs.to(device), label.to(device)
+        target = torch.full_like(label,7).to(device)
+        target[label == 7] = 0
+        
+        if attack == 'fgsm_targeted':
+            x_adv = fgsm_targeted(model,inputs,target,eps)
+            cls = 1
+        
+        elif attack == 'fgsm_untargeted':
+            x_adv = fgsm_untargeted(model,inputs,label,eps)
+            cls = 0
+        
+        elif attack == 'pgd_targeted':
+            x_adv = pgd_targeted(model,inputs,target,k=5,eps=eps)
+            cls = 1
+        
+        elif attack == 'pgd_untargeted':
+            x_adv = pgd_untargeted(model,inputs,label,k=5,eps=eps)
+            cls = 0
+        
+        with torch.no_grad():
+            model_output = model(x_adv)
+            _,preds = torch.max(model_output.data,1)
+        
+            if cls == 0:
+                success += (preds != label).sum().item()
+            else:
+                success += (preds == target).sum().item()
+            
+            tot += label.size(0)
+            
+        if image_created == False:
+            
+            for i in range(5):
+                ori = inputs[i].cpu().permute(1,2,0).numpy()
+                adv = x_adv[i].cpu().permute(1,2,0).numpy()
+                pert = np.clip(np.abs(ori-adv)*10,0,1)
+            
+                fig = plt.figure()
+                fig.tight_layout()
+            
+                ax1 = fig.add_subplot(131)
+                ax1.set_title('Original Image')
+                plt.imshow(ori)
+            
+                ax2 = fig.add_subplot(132)
+                ax2.set_title('Adversarial Image')
+                plt.imshow(adv)
+            
+                ax3 = fig.add_subplot(133)
+                ax3.set_title('Perturbation Image')
+                plt.imshow(pert)
+            
+                if model == mnist_model:
+                    plt.savefig(f"results/mnist/{i}th_mnist_sample.png")
+                else:
+                    plt.savefig(f"results/cifar10/{i}th_cifar10_sample.png")
+                plt.close()
+            image_created = True
+            
+        if tot >= sample_size:
+            break    
+        
+    return 100*success / tot
+
+os.makedirs('results',exist_ok=True)
+os.makedirs('results/cifar10',exist_ok=True)
+os.makedirs('results/mnist',exist_ok=True)
+
+attack_type = ['fgsm_targeted','fgsm_untargeted','pgd_targeted','pgd_untargeted']
+
+mnist_result = {}
+cifar10_result = {}
+
+for attack in attack_type:
+    result = attack_simulation(mnist_model,mnist_dataloaders,attack,'mnist',0.3,device)
+    mnist_result[attack] = result
+    
+for attack in attack_type:
+    result = attack_simulation(cifar10_model,cifar10_dataloaders,attack,'cifar10',0.3,device)
+    cifar10_result[attack] = result   
+    
+print("results")
+for attack in attack_type:
+    print(f"attack type : {attack}")
+    print(f"mnist results: {mnist_result[attack]:.2f},   cifar10 results: {cifar10_result[attack]:.2f}\n\n")
