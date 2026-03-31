@@ -21,7 +21,7 @@ attack 함수 정의
 """
 
 
-def fgsm_targeted(model,x,target,eps=0.01):
+def fgsm_targeted(model,x,target,eps):
     
     x_adv = x.detach().clone().requires_grad_(True) #x에 대한 연산을 추적
     loss_fn = nn.CrossEntropyLoss()
@@ -38,7 +38,7 @@ def fgsm_targeted(model,x,target,eps=0.01):
         
     return x_adv
 
-def fgsm_untargeted(model,x,label,eps=0.01):
+def fgsm_untargeted(model,x,label,eps):
     x_adv = x.detach().clone().requires_grad_(True)
     loss_fn = nn.CrossEntropyLoss()
     
@@ -96,7 +96,6 @@ mnist_transform_train_list = transforms.Compose([
 
 mnist_transform_test_list = transforms.Compose([
     transforms.Resize(resize,interpolation=InterpolationMode.BICUBIC),
-    transforms.RandomCrop(32),
     transforms.ToTensor()
 ])
 
@@ -108,7 +107,6 @@ cifar10_transform_train_list = transforms.Compose([
 
 cifar10_transform_test_list = transforms.Compose([
     transforms.Resize(resize,interpolation=InterpolationMode.BICUBIC),
-    transforms.RandomCrop(32),
     transforms.ToTensor()
 ])
 #dataset 준비
@@ -227,7 +225,7 @@ def train(model,dataloaders,train_epoch,loss_fn,optimizer,scheduler,size):
             epoch_acc = running_corrects / size[phase]
             
             print(f'epoch :{epoch}')
-            print(f'{phase} Loss:{epoch_loss:.6f} // Acc:{100*epoch_acc:.4f}%\n') 
+            print(f'{phase} Loss:{epoch_loss:.6f} // Acc:{100*epoch_acc:.4f}%') 
             
             loss_li[phase].append(epoch_loss)
             acc_li[phase].append(100*epoch_acc)
@@ -237,10 +235,12 @@ def train(model,dataloaders,train_epoch,loss_fn,optimizer,scheduler,size):
     return loss_li,acc_li
 
 #train 시작
-print("===train start===")
+print("===mnist model train start===")
 train(mnist_model,mnist_dataloaders,3,criterion,mnist_optimizer,mnist_scheduler,mnist_size)
+print("===mnist model train end===\n")
+print("==cifar10 model train start===")
 train(cifar10_model,cifar10_dataloaders,5,criterion,cifar10_optimizer,cifar10_scheduler,cifar10_size)
-print("===train end===")
+print("===cifar10 model train end===")
 
 """
 attack simulation 함수 정의
@@ -273,11 +273,11 @@ def attack_simulation(model,dataloaders,attack,dataset,eps,device,sample_size=10
             cls = 0
         
         elif attack == 'pgd_targeted':
-            x_adv = pgd_targeted(model,inputs,target,k=5,eps=eps)
+            x_adv = pgd_targeted(model,inputs,target,k=30,eps=eps)
             cls = 1
         
         elif attack == 'pgd_untargeted':
-            x_adv = pgd_untargeted(model,inputs,label,k=5,eps=eps)
+            x_adv = pgd_untargeted(model,inputs,label,k=30,eps=eps)
             cls = 0
         
         #attack을 적용한 데이터에 대한 예측
@@ -340,17 +340,19 @@ os.makedirs('results/mnist',exist_ok=True)
 """
 결과표시
 """
+print("\n===== attack simulation start =====")
+
 attack_type = ['fgsm_targeted','fgsm_untargeted','pgd_targeted','pgd_untargeted']
 
 mnist_result = {}
 cifar10_result = {}
 
 for attack in attack_type:
-    result = attack_simulation(mnist_model,mnist_dataloaders,attack,'mnist',0.3,device)
+    result = attack_simulation(mnist_model,mnist_dataloaders,attack,'mnist',eps=0.05,device=device)
     mnist_result[attack] = result
     
 for attack in attack_type:
-    result = attack_simulation(cifar10_model,cifar10_dataloaders,attack,'cifar10',0.3,device)
+    result = attack_simulation(cifar10_model,cifar10_dataloaders,attack,'cifar10',eps=0.05,device=device)
     cifar10_result[attack] = result   
     
 print("results")
